@@ -1,15 +1,17 @@
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException,Depends
 from pydantic import BaseModel, Field
-from typing import Optional
-from sqlalchemy.ext.asyncio import  create_async_engine,async_sessionmaker
+from typing import Optional, Annotated
+from sqlalchemy.ext.asyncio import  create_async_engine,async_sessionmaker,AsyncSession
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import select
 
 # Creating engine for connect to database
 engine = create_async_engine('sqlite+aiosqlite:///books.db')
 
 # Creating session maker
 new_session = async_sessionmaker(engine,expire_on_commit=False)
+
 
 async def get_session():
     async with new_session() as session:
@@ -24,9 +26,8 @@ class BookAuthorSchema(BaseModel):
     age: int = Field(ge=1)
 
 class AddBookSchema(BaseModel):
-    name: str = Field(min_length=1,max_length=150)
-    author: Optional[BookAuthorSchema] = None
-    tags: Optional[list[str]] = None
+    title: str = Field(min_length=1,max_length=150)
+    author:Optional[str] = None
 
 class BookShema(AddBookSchema):
     id: int
@@ -41,35 +42,30 @@ class BookModel(Base):
 
 app = FastAPI()
 
+SessionDep = Annotated[AsyncSession,Depends(get_session)]
+
 books:list[BookShema] = []
 
 @app.get('/books')
-def get_books():
-    return books
+async def get_books(session:SessionDep):
+    query = select(BookModel)
+    result  = await session.execute(query)
+    return result.scalars().all()
 
 @app.post('/books')
-def add_book(new_book:AddBookSchema):
-    book = BookShema(
-        id=len(books) + 1,
-        name=new_book.name,
-        tags=new_book.tags,
+async def add_book(new_book:AddBookSchema,session:SessionDep):
+    new_book = BookModel(
+        title=new_book.title,
         author=new_book.author if new_book.author else None
     )
-    books.append(book)
-    return book
+    session.add(new_book)
+    await session.commit()
+    return {"Success":"Book succesfully added!"}
 
 @app.get('/books/{book_id}')
 def get_book_by_id(book_id:int):
     for book in books:
         if book.id == book_id:
-            return book
-    raise HTTPException(status_code=404)
-
-@app.delete('/books/{book_id}')
-def delete_book(book_id):
-    for book in books:
-        if book.id == book_id:
-            books.remove(book)
             return book
     raise HTTPException(status_code=404)
 
