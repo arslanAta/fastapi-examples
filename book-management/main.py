@@ -20,11 +20,6 @@ async def get_session():
 class Base(DeclarativeBase):
     pass
 
-class BookAuthorSchema(BaseModel):
-    id: int
-    name: str = Field(min_length=1,max_length=100)
-    age: int = Field(ge=1)
-
 class AddBookSchema(BaseModel):
     title: str = Field(min_length=1,max_length=150)
     author:Optional[str] = None
@@ -47,15 +42,18 @@ app = FastAPI()
 
 SessionDep = Annotated[AsyncSession,Depends(get_session)]
 
-books:list[BookShema] = []
+@app.on_event("startup")
+async def on_startup():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
-@app.get('/books')
+@app.get('/books',tags=["Book management"])
 async def get_books(session:SessionDep):
     query = select(BookModel)
     result  = await session.execute(query)
     return result.scalars().all()
 
-@app.post('/books')
+@app.post('/books',tags=["Book management"])
 async def add_book(new_book:AddBookSchema,session:SessionDep):
     new_book = BookModel(
         title=new_book.title,
@@ -65,7 +63,7 @@ async def add_book(new_book:AddBookSchema,session:SessionDep):
     await session.commit()
     return {"Success":"Book successfully added!"}
 
-@app.get('/books/{book_id}')
+@app.get('/books/{book_id}',tags=["Book management"])
 async def get_book_by_id(book_id:int,session:SessionDep):
     query = select(BookModel)
     result = await session.execute(query)
@@ -74,7 +72,7 @@ async def get_book_by_id(book_id:int,session:SessionDep):
             return book
     raise HTTPException(status_code=404)
 
-@app.patch('/books/{book_id}')
+@app.patch('/books/{book_id}',tags=["Book management"])
 async def update_book(book_id:int,updated_book:UpdateBookSchema,session:SessionDep):
     # Get book by id
     query = select(BookModel).where(BookModel.id == book_id)
@@ -98,7 +96,7 @@ async def update_book(book_id:int,updated_book:UpdateBookSchema,session:SessionD
     return {"Success": f"Book {book_id} updated", "data": update_fields}
 
 
-@app.delete('/books/{book_id}')
+@app.delete('/books/{book_id}',tags=["Book management"])
 async def delete_book(book_id:int,session:SessionDep):
     query = select(BookModel).where(BookModel.id==book_id)
     result = await session.execute(query)
@@ -109,13 +107,6 @@ async def delete_book(book_id:int,session:SessionDep):
     await session.commit()
     return {"Success": f"Book {book_id} deleted"}
 
-# Endpoint for create database
-@app.post('/setup_database')
-async def setup_database():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
-    return {"Success":'Database created'}
 
 if __name__ == '__main__':
     uvicorn.run("main:app",reload=True)
