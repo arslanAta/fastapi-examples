@@ -2,6 +2,21 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
+from sqlalchemy.ext.asyncio import  create_async_engine,async_sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+# Creating engine for connect to database
+engine = create_async_engine('sqlite+aiosqlite:///books.db')
+
+# Creating session maker
+new_session = async_sessionmaker(engine,expire_on_commit=False)
+
+async def get_session():
+    async with new_session() as session:
+        yield session
+
+class Base(DeclarativeBase):
+    pass
 
 class BookAuthorSchema(BaseModel):
     id: int
@@ -15,6 +30,14 @@ class AddBookSchema(BaseModel):
 
 class BookShema(AddBookSchema):
     id: int
+
+
+class BookModel(Base):
+    __tablename__ = "books"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str]
+    author: Mapped[str]
 
 app = FastAPI()
 
@@ -69,8 +92,16 @@ def delete_book(book_id:int):
     for book in books:
         if book.id == book_id:
             books.remove(book)
-            return {"Sucess":"Book is successfully deleted"}
+            return {"Success":"Book is successfully deleted"}
     raise HTTPException(status_code=404)
+
+# Endpoint for create database
+@app.post('/setup_database')
+async def setup_database():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+    return {"Success":'Database created'}
 
 if __name__ == '__main__':
     uvicorn.run("main:app",reload=True)
