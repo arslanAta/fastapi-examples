@@ -32,6 +32,9 @@ class AddBookSchema(BaseModel):
 class BookShema(AddBookSchema):
     id: int
 
+class UpdateBookSchema(BaseModel):
+    title: Optional[str] = Field(min_length=1, max_length=150)
+    author: Optional[str] = None
 
 class BookModel(Base):
     __tablename__ = "books"
@@ -72,18 +75,28 @@ async def get_book_by_id(book_id:int,session:SessionDep):
     raise HTTPException(status_code=404)
 
 @app.patch('/books/{book_id}')
-def update_book(book_id:int,updated_book:AddBookSchema):
-    for index, book in enumerate(books):
-        if book.id == book_id:
+async def update_book(book_id:int,updated_book:UpdateBookSchema,session:SessionDep):
+    # Get book by id
+    query = select(BookModel).where(BookModel.id == book_id)
+    result = await session.execute(query)
+    book = result.scalar_one_or_none()
 
-            updated_data = updated_book.model_dump(exclude_unset=True)
+    # Return 404 if book not exists in given id
+    if not book:
+        raise HTTPException(status_code=404)
 
-            updated_book_instance = book.model_copy(update=updated_data)
+    update_fields = updated_book.model_dump(exclude_unset=True)
 
-            books[index] = updated_book_instance
-            return updated_book_instance
+    # Update book values dynamically
+    for field, value in update_fields.items():
+        setattr(book, field, value)
 
-    raise HTTPException(status_code=404)
+    # Save changes and refresh
+    await session.commit()
+    await session.refresh(book)
+
+    return {"Success": f"Book {book_id} updated", "data": update_fields}
+
 
 @app.delete('/books/{book_id}')
 async def delete_book(book_id:int,session:SessionDep):
