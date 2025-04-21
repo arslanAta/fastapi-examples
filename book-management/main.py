@@ -60,11 +60,13 @@ async def add_book(new_book:AddBookSchema,session:SessionDep):
     )
     session.add(new_book)
     await session.commit()
-    return {"Success":"Book succesfully added!"}
+    return {"Success":"Book successfully added!"}
 
 @app.get('/books/{book_id}')
-def get_book_by_id(book_id:int):
-    for book in books:
+async def get_book_by_id(book_id:int,session:SessionDep):
+    query = select(BookModel)
+    result = await session.execute(query)
+    for book in result.scalars().all():
         if book.id == book_id:
             return book
     raise HTTPException(status_code=404)
@@ -84,12 +86,15 @@ def update_book(book_id:int,updated_book:AddBookSchema):
     raise HTTPException(status_code=404)
 
 @app.delete('/books/{book_id}')
-def delete_book(book_id:int):
-    for book in books:
-        if book.id == book_id:
-            books.remove(book)
-            return {"Success":"Book is successfully deleted"}
-    raise HTTPException(status_code=404)
+async def delete_book(book_id:int,session:SessionDep):
+    query = select(BookModel).where(BookModel.id==book_id)
+    result = await session.execute(query)
+    book = result.scalar_one_or_none()
+    if not book:
+        raise HTTPException(status_code=404)
+    await session.delete(book)
+    await session.commit()
+    return {"Success": f"Book {book_id} deleted"}
 
 # Endpoint for create database
 @app.post('/setup_database')
