@@ -1,59 +1,25 @@
-import uvicorn
-from fastapi import FastAPI, HTTPException,Depends
-from pydantic import BaseModel, Field
-from typing import Optional, Annotated
-from sqlalchemy.ext.asyncio import  create_async_engine,async_sessionmaker,AsyncSession
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 
-# Creating engine for connect to database
-engine = create_async_engine('sqlite+aiosqlite:///books.db')
+from src.api.dependencies import SessionDep
+from src.database import Base, engine
+from src.models.books import BookModel
+from src.schemas.book import AddBookSchema, UpdateBookSchema
 
-# Creating session maker
-new_session = async_sessionmaker(engine,expire_on_commit=False)
+book_router = APIRouter()
 
-
-async def get_session():
-    async with new_session() as session:
-        yield session
-
-class Base(DeclarativeBase):
-    pass
-
-class AddBookSchema(BaseModel):
-    title: str = Field(min_length=1,max_length=150)
-    author:Optional[str] = None
-
-class BookShema(AddBookSchema):
-    id: int
-
-class UpdateBookSchema(BaseModel):
-    title: Optional[str] = Field(min_length=1, max_length=150)
-    author: Optional[str] = None
-
-class BookModel(Base):
-    __tablename__ = "books"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    title: Mapped[str]
-    author: Mapped[str]
-
-app = FastAPI()
-
-SessionDep = Annotated[AsyncSession,Depends(get_session)]
-
-@app.on_event("startup")
+@book_router.on_event("startup")
 async def on_startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-@app.get('/books',tags=["Book management"])
+@book_router.get('/books',tags=["Book management"])
 async def get_books(session:SessionDep):
     query = select(BookModel)
     result  = await session.execute(query)
     return result.scalars().all()
 
-@app.post('/books',tags=["Book management"])
+@book_router.post('/books',tags=["Book management"])
 async def add_book(new_book:AddBookSchema,session:SessionDep):
     new_book = BookModel(
         title=new_book.title,
@@ -63,7 +29,7 @@ async def add_book(new_book:AddBookSchema,session:SessionDep):
     await session.commit()
     return {"Success":"Book successfully added!"}
 
-@app.get('/books/{book_id}',tags=["Book management"])
+@book_router.get('/books/{book_id}',tags=["Book management"])
 async def get_book_by_id(book_id:int,session:SessionDep):
     query = select(BookModel)
     result = await session.execute(query)
@@ -72,7 +38,7 @@ async def get_book_by_id(book_id:int,session:SessionDep):
             return book
     raise HTTPException(status_code=404)
 
-@app.patch('/books/{book_id}',tags=["Book management"])
+@book_router.patch('/books/{book_id}',tags=["Book management"])
 async def update_book(book_id:int,updated_book:UpdateBookSchema,session:SessionDep):
     # Get book by id
     query = select(BookModel).where(BookModel.id == book_id)
@@ -95,18 +61,20 @@ async def update_book(book_id:int,updated_book:UpdateBookSchema,session:SessionD
 
     return {"Success": f"Book {book_id} updated", "data": update_fields}
 
-
-@app.delete('/books/{book_id}',tags=["Book management"])
+# Delete book by id
+@book_router.delete('/books/{book_id}',tags=["Book management"])
 async def delete_book(book_id:int,session:SessionDep):
+
+    # Find book by id
     query = select(BookModel).where(BookModel.id==book_id)
     result = await session.execute(query)
     book = result.scalar_one_or_none()
+
+    # Return error if book in given id not exists
     if not book:
         raise HTTPException(status_code=404)
+
+    # Delete book and commit changes
     await session.delete(book)
     await session.commit()
     return {"Success": f"Book {book_id} deleted"}
-
-
-if __name__ == '__main__':
-    uvicorn.run("main:app",reload=True)
